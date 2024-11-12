@@ -215,6 +215,18 @@ pub struct Sheet {
     pub visible: SheetVisible,
 }
 
+/// Row to use as header
+/// By default, the first non-empty row is used as header
+#[derive(Debug, Default, Clone, Copy)]
+#[non_exhaustive]
+pub enum HeaderRow {
+    /// First non-empty row
+    #[default]
+    FirstNonEmptyRow,
+    /// Index of the header row
+    Row(u32),
+}
+
 // FIXME `Reader` must only be seek `Seek` for `Xls::xls`. Because of the present API this limits
 // the kinds of readers (other) data in formats can be read from.
 /// A trait to share spreadsheets reader functions across different `FileType`s
@@ -227,6 +239,10 @@ where
 
     /// Creates a new instance.
     fn new(reader: RS) -> Result<Self, Self::Error>;
+
+    /// Set header row (i.e. first row to be read)
+    /// If `header_row` is `None`, the first non-empty row will be used as header row
+    fn with_header_row(&mut self, header_row: HeaderRow) -> &mut Self;
 
     /// Gets `VbaProject`
     fn vba_project(&mut self) -> Option<Result<Cow<'_, VbaProject>, Self::Error>>;
@@ -468,7 +484,7 @@ impl<T: CellType> Range<T> {
             // search bounds
             let row_start = cells.first().unwrap().pos.0;
             let row_end = cells.last().unwrap().pos.0;
-            let mut col_start = std::u32::MAX;
+            let mut col_start = u32::MAX;
             let mut col_end = 0;
             for c in cells.iter().map(|c| c.pos.1) {
                 if c < col_start {
@@ -954,6 +970,12 @@ impl<T> Table<T> {
     /// Get a range representing the data from the table (excludes column headers)
     pub fn data(&self) -> &Range<T> {
         &self.data
+    }
+}
+
+impl<T: CellType> From<Table<T>> for Range<T> {
+    fn from(table: Table<T>) -> Range<T> {
+        table.data
     }
 }
 

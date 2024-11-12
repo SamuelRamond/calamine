@@ -45,9 +45,11 @@ fn example() -> Result<(), Error> {
 }
 ```
 
-Calamine provides helper functions to deal with invalid type values. For instance if you
-want to deserialize a column which should contain floats but may also contain invalid values
-(i.e. strings), you can use the [`deserialize_as_f64_or_none`] helper function with Serde's
+Calamine provides helper functions to deal with invalid type values. For
+instance, to deserialize a column which should contain floats but may also
+contain invalid values (i.e. strings), you can use the
+[`deserialize_as_f64_or_none`](https://docs.rs/calamine/latest/calamine/fn.deserialize_as_f64_or_none.html)
+helper function with Serde's
 [`deserialize_with`](https://serde.rs/field-attrs.html) field attribute:
 
 ```rust
@@ -81,8 +83,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-The [`deserialize_as_f64_or_none`] function will discard all invalid values, if you want to
-return them as `String` you can use the [`deserialize_as_f64_or_string`] function instead.
+The
+[`deserialize_as_f64_or_none`](https://docs.rs/calamine/latest/calamine/fn.deserialize_as_f64_or_none.html)
+function discards all invalid values. If instead you would like to return them
+as `String`s, you can use the similar
+[`deserialize_as_f64_or_string`](https://docs.rs/calamine/latest/calamine/fn.deserialize_as_f64_or_string.html)
+function.
 
 ### Reader: Simple
 
@@ -90,12 +96,32 @@ return them as `String` you can use the [`deserialize_as_f64_or_string`] functio
 use calamine::{Reader, Xlsx, open_workbook};
 
 let mut excel: Xlsx<_> = open_workbook("file.xlsx").unwrap();
-if let Some(Ok(r)) = excel.worksheet_range("Sheet1") {
+if let Ok(r) = excel.worksheet_range("Sheet1") {
     for row in r.rows() {
         println!("row={:?}, row[0]={:?}", row, row[0]);
     }
 }
 ```
+
+### Reader: With header row
+
+```rs
+use calamine::{HeaderRow, Reader, Xlsx, open_workbook};
+
+let mut excel: Xlsx<_> = open_workbook("file.xlsx").unwrap();
+
+let sheet1 = excel
+    .with_header_row(HeaderRow::Row(3))
+    .worksheet_range("Sheet1")
+    .unwrap();
+```
+
+Note that `xlsx` and `xlsb` files support lazy loading, so specifying a
+header row takes effect immediately when reading a sheet range.
+In contrast, for `xls` and `ods` files, all sheets are loaded at once when
+opening the workbook with default settings.
+As a result, setting the header row only applies afterward and does not
+provide any performance benefits.
 
 ### Reader: More complex
 
@@ -184,7 +210,7 @@ The programs are all structured to follow the same constructs:
 use calamine::{open_workbook, Reader, Xlsx};
 
 fn main() {
-    // Open workbook 
+    // Open workbook
     let mut excel: Xlsx<_> =
         open_workbook("NYC_311_SR_2010-2020-sample-1M.xlsx").expect("failed to find file");
 

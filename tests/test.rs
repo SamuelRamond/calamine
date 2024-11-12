@@ -1,10 +1,11 @@
-use calamine::Data::{Bool, DateTime, DateTimeIso, DurationIso, Empty, Error, Float, String};
+use calamine::Data::{Bool, DateTime, DateTimeIso, DurationIso, Empty, Error, Float, Int, String};
 use calamine::{
     open_workbook, open_workbook_auto, DataRef, DataType, Dimensions, ExcelDateTime,
-    ExcelDateTimeType, Ods, Range, Reader, ReaderRef, Sheet, SheetType, SheetVisible, Xls, Xlsb,
-    Xlsx,
+    ExcelDateTimeType, HeaderRow, Ods, Range, Reader, ReaderRef, Sheet, SheetType, SheetVisible,
+    Xls, Xlsb, Xlsx,
 };
 use calamine::{CellErrorType::*, Data};
+use rstest::rstest;
 use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::{BufReader, Cursor};
@@ -584,6 +585,109 @@ fn table() {
     assert_eq!(data.get((0, 1)), Some(&Float(12.5)));
     assert_eq!(data.get((1, 1)), Some(&Float(64.0)));
     xls.worksheet_range_at(0).unwrap().unwrap();
+
+    // Check if owned data works
+    let owned_data: Range<Data> = table.into();
+
+    assert_eq!(
+        owned_data.get((0, 0)),
+        Some(&String("something".to_owned()))
+    );
+    assert_eq!(owned_data.get((1, 0)), Some(&String("else".to_owned())));
+    assert_eq!(owned_data.get((0, 1)), Some(&Float(12.5)));
+    assert_eq!(owned_data.get((1, 1)), Some(&Float(64.0)));
+}
+
+#[test]
+fn table_by_ref() {
+    let mut xls: Xlsx<_> = wb("temperature-table.xlsx");
+    xls.load_tables().unwrap();
+    let table_names = xls.table_names();
+    assert_eq!(table_names[0], "Temperature");
+    assert_eq!(table_names[1], "OtherTable");
+    let table = xls
+        .table_by_name_ref("Temperature")
+        .expect("Parsing table's sheet should not error");
+    assert_eq!(table.name(), "Temperature");
+    assert_eq!(table.columns()[0], "label");
+    assert_eq!(table.columns()[1], "value");
+    let data = table.data();
+    assert_eq!(
+        data.get((0, 0))
+            .expect("Could not get data from table ref."),
+        &DataRef::SharedString("celsius")
+    );
+    assert_eq!(
+        data.get((1, 0))
+            .expect("Could not get data from table ref."),
+        &DataRef::SharedString("fahrenheit")
+    );
+    assert_eq!(
+        data.get((0, 1))
+            .expect("Could not get data from table ref."),
+        &DataRef::Float(22.2222)
+    );
+    assert_eq!(
+        data.get((1, 1))
+            .expect("Could not get data from table ref."),
+        &DataRef::Float(72.0)
+    );
+    // Check the second table
+    let table = xls
+        .table_by_name_ref("OtherTable")
+        .expect("Parsing table's sheet should not error");
+    assert_eq!(table.name(), "OtherTable");
+    assert_eq!(table.columns()[0], "label2");
+    assert_eq!(table.columns()[1], "value2");
+    let data = table.data();
+    assert_eq!(
+        data.get((0, 0))
+            .expect("Could not get data from table ref."),
+        &DataRef::SharedString("something")
+    );
+    assert_eq!(
+        data.get((1, 0))
+            .expect("Could not get data from table ref."),
+        &DataRef::SharedString("else")
+    );
+    assert_eq!(
+        data.get((0, 1))
+            .expect("Could not get data from table ref."),
+        &DataRef::Float(12.5)
+    );
+    assert_eq!(
+        data.get((1, 1))
+            .expect("Could not get data from table ref."),
+        &DataRef::Float(64.0)
+    );
+
+    // Check if owned data works
+    let owned_data: Range<DataRef> = table.into();
+
+    assert_eq!(
+        owned_data
+            .get((0, 0))
+            .expect("Could not get data from table ref."),
+        &DataRef::SharedString("something")
+    );
+    assert_eq!(
+        owned_data
+            .get((1, 0))
+            .expect("Could not get data from table ref."),
+        &DataRef::SharedString("else")
+    );
+    assert_eq!(
+        owned_data
+            .get((0, 1))
+            .expect("Could not get data from table ref."),
+        &DataRef::Float(12.5)
+    );
+    assert_eq!(
+        owned_data
+            .get((1, 1))
+            .expect("Could not get data from table ref."),
+        &DataRef::Float(64.0)
+    );
 }
 
 #[test]
@@ -1097,7 +1201,7 @@ fn merged_regions_xlsx() {
 
 #[test]
 fn issue_252() {
-    let path = format!("issue252.xlsx");
+    let path = "issue252.xlsx";
 
     // should err, not panic
     assert!(open_workbook::<Xls<_>, _>(&path).is_err());
@@ -1227,25 +1331,34 @@ fn issue_305_merge_cells_xls() {
     );
 }
 
+#[cfg(feature = "picture")]
+fn digest(data: &[u8]) -> [u8; 32] {
+    use sha2::digest::Digest;
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(data);
+    hasher.finalize().into()
+}
+
 // cargo test --features picture
 #[test]
 #[cfg(feature = "picture")]
 fn pictures() -> Result<(), calamine::Error> {
-    let jpg_path = format!("picture.jpg");
-    let png_path = format!("picture.png");
+    let path = |name: &str| format!("{}/tests/{name}", env!("CARGO_MANIFEST_DIR"));
+    let jpg_path = path("picture.jpg");
+    let png_path = path("picture.png");
 
-    let xlsx_path = format!("picture.xlsx");
-    let xlsb_path = format!("picture.xlsb");
-    let xls_path = format!("picture.xls");
-    let ods_path = format!("picture.ods");
+    let xlsx_path = "picture.xlsx";
+    let xlsb_path = "picture.xlsb";
+    let xls_path = "picture.xls";
+    let ods_path = "picture.ods";
 
-    let jpg_hash = sha256::digest(&*std::fs::read(&jpg_path)?);
-    let png_hash = sha256::digest(&*std::fs::read(&png_path)?);
+    let jpg_hash = digest(&std::fs::read(jpg_path)?);
+    let png_hash = digest(&std::fs::read(png_path)?);
 
-    let xlsx: Xlsx<_> = wb(xlsx_path)?;
-    let xlsb: Xlsb<_> = wb(xlsb_path)?;
-    let xls: Xls<_> = wb(xls_path)?;
-    let ods: Ods<_> = wb(ods_path)?;
+    let xlsx: Xlsx<_> = wb(xlsx_path);
+    let xlsb: Xlsb<_> = wb(xlsb_path);
+    let xls: Xls<_> = wb(xls_path);
+    let ods: Ods<_> = wb(ods_path);
 
     let mut pictures = Vec::with_capacity(8);
     let mut pass = 0;
@@ -1263,7 +1376,7 @@ fn pictures() -> Result<(), calamine::Error> {
         pictures.extend(pics);
     }
     for (ext, data) in pictures {
-        let pic_hash = sha256::digest(&*data);
+        let pic_hash = digest(&data);
         if ext == "jpg" || ext == "jpeg" {
             assert_eq!(jpg_hash, pic_hash);
         } else if ext == "png" {
@@ -1785,4 +1898,243 @@ fn test_ref_xlsb() {
             ]
         ]
     );
+}
+
+#[rstest]
+#[case("header-row.xlsx", HeaderRow::FirstNonEmptyRow, (2, 0), (9, 3), &[Empty, Empty, String("Note 1".to_string()), Empty], 32)]
+#[case("header-row.xlsx", HeaderRow::Row(0), (0, 0), (9, 3), &[Empty, Empty, Empty, Empty], 40)]
+#[case("header-row.xlsx", HeaderRow::Row(8), (8, 0), (9, 3), &[String("Columns".to_string()), String("Column A".to_string()), String("Column B".to_string()), String("Column C".to_string())], 8)]
+#[case("temperature.xlsx", HeaderRow::FirstNonEmptyRow, (0, 0), (2, 1), &[String("label".to_string()), String("value".to_string())], 6)]
+#[case("temperature.xlsx", HeaderRow::Row(0), (0, 0), (2, 1), &[String("label".to_string()), String("value".to_string())], 6)]
+#[case("temperature-in-middle.xlsx", HeaderRow::FirstNonEmptyRow, (3, 1), (5, 2), &[String("label".to_string()), String("value".to_string())], 6)]
+#[case("temperature-in-middle.xlsx", HeaderRow::Row(0), (0, 1), (5, 2), &[Empty, Empty], 12)]
+fn test_header_row_xlsx(
+    #[case] fixture_path: &str,
+    #[case] header_row: HeaderRow,
+    #[case] expected_start: (u32, u32),
+    #[case] expected_end: (u32, u32),
+    #[case] expected_first_row: &[Data],
+    #[case] expected_total_cells: usize,
+) {
+    let mut excel: Xlsx<_> = wb(fixture_path);
+    assert_eq!(
+        excel.sheets_metadata(),
+        &[Sheet {
+            name: "Sheet1".to_string(),
+            typ: SheetType::WorkSheet,
+            visible: SheetVisible::Visible
+        },]
+    );
+
+    let range = excel
+        .with_header_row(header_row)
+        .worksheet_range("Sheet1")
+        .unwrap();
+    assert_eq!(range.start(), Some(expected_start));
+    assert_eq!(range.end(), Some(expected_end));
+    assert_eq!(range.rows().next().unwrap(), expected_first_row);
+    assert_eq!(range.cells().count(), expected_total_cells);
+}
+
+#[test]
+fn test_read_twice_with_different_header_rows() {
+    let mut xlsx: Xlsx<_> = wb("any_sheets.xlsx");
+    let _ = xlsx
+        .with_header_row(HeaderRow::Row(2))
+        .worksheet_range("Visible")
+        .unwrap();
+    let _ = xlsx
+        .with_header_row(HeaderRow::Row(1))
+        .worksheet_range("Visible")
+        .unwrap();
+}
+
+#[test]
+fn test_header_row_xlsb() {
+    let mut xlsb: Xlsb<_> = wb("date.xlsb");
+    assert_eq!(
+        xlsb.sheets_metadata(),
+        &[Sheet {
+            name: "Sheet1".to_string(),
+            typ: SheetType::WorkSheet,
+            visible: SheetVisible::Visible
+        }]
+    );
+
+    let first_line = [
+        DateTime(ExcelDateTime::new(
+            44197.0,
+            ExcelDateTimeType::DateTime,
+            false,
+        )),
+        Float(15.0),
+    ];
+    let second_line = [
+        DateTime(ExcelDateTime::new(
+            44198.0,
+            ExcelDateTimeType::DateTime,
+            false,
+        )),
+        Float(16.0),
+    ];
+
+    let range = xlsb.worksheet_range("Sheet1").unwrap();
+    assert_eq!(range.start(), Some((0, 0)));
+    assert_eq!(range.end(), Some((2, 1)));
+    assert_eq!(range.rows().next().unwrap(), &first_line);
+    assert_eq!(range.rows().nth(1).unwrap(), &second_line);
+
+    let range = xlsb
+        .with_header_row(HeaderRow::Row(1))
+        .worksheet_range("Sheet1")
+        .unwrap();
+    assert_eq!(range.start(), Some((1, 0)));
+    assert_eq!(range.end(), Some((2, 1)));
+    assert_eq!(range.rows().next().unwrap(), &second_line);
+}
+
+#[test]
+fn test_header_row_xls() {
+    let mut xls: Xls<_> = wb("date.xls");
+    assert_eq!(
+        xls.sheets_metadata(),
+        &[Sheet {
+            name: "Sheet1".to_string(),
+            typ: SheetType::WorkSheet,
+            visible: SheetVisible::Visible
+        }]
+    );
+
+    let first_line = [
+        DateTime(ExcelDateTime::new(
+            44197.0,
+            ExcelDateTimeType::DateTime,
+            false,
+        )),
+        Int(15),
+    ];
+    let second_line = [
+        DateTime(ExcelDateTime::new(
+            44198.0,
+            ExcelDateTimeType::DateTime,
+            false,
+        )),
+        Int(16),
+    ];
+
+    let range = xls.worksheet_range("Sheet1").unwrap();
+    assert_eq!(range.start(), Some((0, 0)));
+    assert_eq!(range.end(), Some((2, 1)));
+    assert_eq!(range.rows().next().unwrap(), &first_line);
+    assert_eq!(range.rows().nth(1).unwrap(), &second_line);
+
+    let range = xls
+        .with_header_row(HeaderRow::Row(1))
+        .worksheet_range("Sheet1")
+        .unwrap();
+    assert_eq!(range.start(), Some((1, 0)));
+    assert_eq!(range.end(), Some((2, 1)));
+    assert_eq!(range.rows().next().unwrap(), &second_line);
+}
+
+#[test]
+fn test_header_row_ods() {
+    let mut ods: Ods<_> = wb("date.ods");
+    assert_eq!(
+        ods.sheets_metadata(),
+        &[Sheet {
+            name: "Sheet1".to_string(),
+            typ: SheetType::WorkSheet,
+            visible: SheetVisible::Visible
+        }]
+    );
+
+    let first_line = [DateTimeIso("2021-01-01".to_string()), Float(15.0)];
+    let third_line = [DurationIso("PT10H10M10S".to_string()), Float(17.0)];
+
+    let range = ods.worksheet_range("Sheet1").unwrap();
+    assert_eq!(range.start(), Some((0, 0)));
+    assert_eq!(range.end(), Some((3, 1)));
+    assert_eq!(range.rows().next().unwrap(), &first_line);
+    assert_eq!(range.rows().nth(2).unwrap(), &third_line);
+
+    let range = ods
+        .with_header_row(HeaderRow::Row(2))
+        .worksheet_range("Sheet1")
+        .unwrap();
+    assert_eq!(range.start(), Some((2, 0)));
+    assert_eq!(range.end(), Some((3, 1)));
+    assert_eq!(range.rows().next().unwrap(), &third_line);
+}
+
+#[rstest]
+#[case("single-empty.ods")]
+#[case("multi-empty.ods")]
+fn issue_repeated_empty(#[case] fixture_path: &str) {
+    let mut ods: Ods<_> = wb(fixture_path);
+    let range = ods.worksheet_range_at(0).unwrap().unwrap();
+    range_eq!(
+        range,
+        [
+            [String("StringCol".to_string())],
+            [String("bbb".to_string())],
+            [String("ccc".to_string())],
+            [String("ddd".to_string())],
+            [String("eee".to_string())],
+            [Empty],
+            [Empty],
+            [Empty],
+            [Empty],
+            [Empty],
+            [Empty],
+            [Empty],
+            [String("zzz".to_string())],
+        ]
+    );
+}
+
+#[test]
+fn ods_with_annotations() {
+    let mut ods: Ods<_> = wb("with-annotation.ods");
+    let range = ods.worksheet_range("table1").unwrap();
+    range_eq!(range, [[String("cell a.1".to_string())],]);
+}
+
+#[rstest]
+#[case(HeaderRow::Row(0), &[
+    [Empty, Empty],
+    [Empty, Empty],
+    [String("a".to_string()), Float(0.0)],
+    [String("b".to_string()), Float(1.0)]
+])]
+#[case(HeaderRow::Row(1), &[
+    [Empty, Empty],
+    [String("a".to_string()), Float(0.0)],
+    [String("b".to_string()), Float(1.0)]
+])]
+#[case(HeaderRow::Row(2), &[
+    [String("a".to_string()), Float(0.0)],
+    [String("b".to_string()), Float(1.0)]
+])]
+fn test_no_header(#[case] header_row: HeaderRow, #[case] expected: &[[Data; 2]]) {
+    let mut excel: Xlsx<_> = wb("no-header.xlsx");
+    let range = excel
+        .with_header_row(header_row)
+        .worksheet_range_at(0)
+        .unwrap()
+        .unwrap();
+    range_eq!(range, expected);
+}
+
+#[test]
+fn test_string_ref() {
+    let mut xlsx: Xlsx<_> = wb("string-ref.xlsx");
+    let expected_range = [
+        [String("col1".to_string())],
+        [String("-8086931554011838357".to_string())],
+    ];
+    // first sheet
+    range_eq!(xlsx.worksheet_range_at(0).unwrap().unwrap(), expected_range);
+    // second sheet is the same with a cell reference to the first sheet
+    range_eq!(xlsx.worksheet_range_at(1).unwrap().unwrap(), expected_range);
 }
